@@ -297,7 +297,7 @@ def get_clinvar_data(rsID):
     else:
         print("Failed to retrieve data from ClinVar.")
 
-# @capture_output
+@capture_output
 def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
     print_header(gene_symbol)
     cytogenetic_band = get_cytogenetic_band(gene_symbol)
@@ -311,6 +311,5 @@ def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcrip
     rsID = get_rsID(hgvs_cdna_transcript_id)
     get_clinvar_data(rsID)
 
-program()
 captured_text = program()
 create_pdf_from_text(captured_text, output_pdf_file_path)

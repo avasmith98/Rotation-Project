@@ -13,14 +13,14 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from xml.etree import ElementTree as ET
 
 # Pick below for testing
-gene_symbol = "NLGN4X"
-hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
+# gene_symbol = "NLGN4X"
+# hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
 
-#gene_symbol = "EGFR"
-#hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
+gene_symbol = "EGFR"
+hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
 
-#gene_symbol = "KCNMA1"
-#hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
+# gene_symbol = "KCNMA1"
+# hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
 
 output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice Case\{gene_symbol}.pdf"
 
@@ -40,50 +40,17 @@ def split_and_style(line, normal_style):
         return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
     return Paragraph(line, normal_style)
 
-def create_protein_domains_table(domains):
-    title = Paragraph("<b>Protein Domains</b>", getSampleStyleSheet()['Heading2'])
-    data = [["Source", "Description", "Start", "End"]]
-    for domain in domains:
-        row = [
-            domain.get('Source', 'N/A'),
-            domain.get('Description', 'N/A'),
-            domain.get('Start', 'N/A'),
-            domain.get('End', 'N/A')
-        ]
-        data.append(row)
-
-    table = Table(data, colWidths=[100, 250, 50, 50])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    return [title, Spacer(1, 12), table]
-
-
 def create_pdf_from_text(text, output_path):
     styles = getSampleStyleSheet()
     normal_style = styles['Normal']
-    bold_style = ParagraphStyle(name='BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold')
     header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
 
     doc = SimpleDocTemplate(output_path, pagesize=letter)
     story = []
 
-    protein_domains = []
-    is_protein_domains_section = False
-    has_clinvar_data = False
-    clinvar_checked = False
-
     for line in text.splitlines():
         if line.startswith("Variant Analysis Report:"):
             story.append(Paragraph(line, header_style))
-            story.append(Spacer(1, 12))
         elif line.startswith("Report generated on"):
             story.append(Paragraph(line, normal_style))
             story.append(Spacer(1, 12))
@@ -91,43 +58,13 @@ def create_pdf_from_text(text, output_path):
             "Cytogenetic band:", "High protein expression:", "Transcript length:", 
             "Translation length:", "Total number of exons:", "Number of coding exons:", 
             "Variant location:", "Variant classification:", "Variant condition:", 
-            "Variant more info:"
+            "Variant more info:", "Protein Domain(s):"
         ]):
             story.append(split_and_style(line, normal_style))
-            story.append(Spacer(1, 12))
-            if line.startswith("Variant classification:") or line.startswith("Variant condition:") or line.startswith("Variant more info:"):
-                has_clinvar_data = True
-        elif line.startswith("Protein Domain(s):"):
-            is_protein_domains_section = True
-        elif is_protein_domains_section and line.startswith("Source:"):
-            domain_parts = line.split(',')
-            domain_data = {}
-            for part in domain_parts:
-                if ':' in part:
-                    key, value = part.split(':', 1)
-                    domain_data[key.strip()] = value.strip()
-            protein_domains.append(domain_data)
-        else:
-            if is_protein_domains_section:
-                if protein_domains and not clinvar_checked:
-                    if not has_clinvar_data:
-                        story.append(Paragraph("ClinVar:", bold_style))
-                        story.append(Paragraph("No ClinVar submissions found for this rsID.", normal_style))
-                        story.append(Spacer(1, 12))
-                        clinvar_checked = True  # Prevent further messages
-                    story.extend(create_protein_domains_table(protein_domains))
-                    story.append(Spacer(1, 12))
-                is_protein_domains_section = False
+        elif line.startswith("Source:"):
             story.append(Paragraph(line, normal_style))
-            story.append(Spacer(1, 12))
-
-    if is_protein_domains_section and protein_domains and not clinvar_checked:
-        if not has_clinvar_data:
-            story.append(Paragraph("ClinVar:", bold_style))
-            story.append(Paragraph("No ClinVar submissions found for this rsID.", normal_style))
-            story.append(Spacer(1, 12))
-        story.extend(create_protein_domains_table(protein_domains))
-        story.append(Spacer(1, 12))
+        else:
+            story.append(Paragraph(line, normal_style))
 
     try:
         doc.build(story)
@@ -135,8 +72,19 @@ def create_pdf_from_text(text, output_path):
         print(f"Error: {e}")
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
 
+def print_header(gene_symbol):
+    print(f"Variant Analysis Report: {gene_symbol}")
+    print(f"Report generated on {datetime.date.today().strftime('%B %d, %Y')}")
 
-      
+def send_request(url, headers=None, params=None):
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response
+    except requests.RequestException as e:
+        print(f"Failed to retrieve data from {url}: {e}")
+        return None
+
 def truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id):
     return hgvs_cdna_transcript_id.split(':')[0].split('.')[0]
 
@@ -346,14 +294,12 @@ def get_clinvar_data(rsID):
                     for key, value in data.items():
                         value = ' '.join(value.split())
                         print(f"{key}: {value}")
-                return True  
             else:
-                return False  
+                print("No data extracted from the rows.")
         else:
-            return False  
+            print("No ClinVar submissions found for this rsID.")
     else:
         print("Failed to retrieve data from ClinVar.")
-        return False  
 
 @capture_output
 def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
@@ -371,3 +317,4 @@ def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcrip
 
 captured_text = program()
 create_pdf_from_text(captured_text, output_pdf_file_path)
+

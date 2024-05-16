@@ -6,17 +6,21 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from xml.etree import ElementTree as ET
 
-"""Pick below for testing"""
-#gene_symbol = "NLGN4X"
-#hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
+# Pick below for testing
+# gene_symbol = "NLGN4X"
+# hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
 
-#gene_symbol = "EGFR"
-#hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
+gene_symbol = "EGFR"
+hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
 
-#gene_symbol = "KCNMA1"
-#hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
+# gene_symbol = "KCNMA1"
+# hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
 
 output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice Case\{gene_symbol}.pdf"
 
@@ -30,21 +34,53 @@ def capture_output(func):
         return captured_text
     return wrapper
 
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+def split_and_style(line, normal_style):
+    parts = line.split(':', 1)
+    if len(parts) > 1:
+        return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
+    return Paragraph(line, normal_style)
+
 def create_pdf_from_text(text, output_path):
-    c = canvas.Canvas(output_path, pagesize=letter)
-    text_object = c.beginText(40, 750)
-    text_object.setFont("Helvetica", 12)
+    styles = getSampleStyleSheet()
+    normal_style = styles['Normal']
+    header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
+
+    doc = SimpleDocTemplate(output_path, pagesize=letter)
+    story = []
+
     for line in text.splitlines():
-        text_object.textLine(line)
-    c.drawText(text_object)
-    c.save()
+        if line.startswith("Variant Analysis Report:"):
+            story.append(Paragraph(line, header_style))
+        elif line.startswith("Report generated on"):
+            story.append(Paragraph(line, normal_style))
+            story.append(Spacer(1, 12))
+        elif any(line.startswith(prefix) for prefix in [
+            "Cytogenetic band:", "High protein expression:", "Transcript length:", 
+            "Translation length:", "Total number of exons:", "Number of coding exons:", 
+            "Variant location:", "Variant classification:", "Variant condition:", 
+            "Variant more info:", "Protein Domain(s):"
+        ]):
+            story.append(split_and_style(line, normal_style))
+        elif line.startswith("Source:"):
+            story.append(Paragraph(line, normal_style))
+        else:
+            story.append(Paragraph(line, normal_style))
+
+    try:
+        doc.build(story)
+    except PermissionError as e:
+        print(f"Error: {e}")
+        print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
 
 def print_header(gene_symbol):
     print(f"Variant Analysis Report: {gene_symbol}")
     print(f"Report generated on {datetime.date.today().strftime('%B %d, %Y')}")
 
 def send_request(url, headers=None, params=None):
-    """Helper function to send HTTP requests and handle errors."""
     try:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
@@ -54,11 +90,9 @@ def send_request(url, headers=None, params=None):
         return None
 
 def truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id):
-    hgvs_cdna_transcript_id_truncated = hgvs_cdna_transcript_id.split(':')[0].split('.')[0]
-    return hgvs_cdna_transcript_id_truncated
+    return hgvs_cdna_transcript_id.split(':')[0].split('.')[0]
 
 def get_cytogenetic_band(gene_symbol):
-    """Get the cytogenetic band location for the gene."""
     search_url = f'https://api.genome.ucsc.edu/search?search={gene_symbol}&genome=hg38'
     search_response = requests.get(search_url)
     search_data = search_response.json()
@@ -86,17 +120,14 @@ def get_cytogenetic_band(gene_symbol):
         return "Gene symbol not found or data incomplete."
 
 def get_ensembl_gene_id(gene_symbol):
-    """Get Ensembl ID using gene symbol from Ensembl API."""
     url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}"
     headers = {"Content-Type": "application/json"}
     response = send_request(url, headers)
     if response:
-        ensembl_gene_id = response.json().get("id")
-        return ensembl_gene_id
+        return response.json().get("id")
     return None
 
 def get_high_protein_expression(ensembl_gene_id):
-    """Get tissues with high protein levels from the Human Protein Atlas."""
     url = f"https://www.proteinatlas.org/{ensembl_gene_id}.xml"
     response = send_request(url)
     high_protein_expression = []
@@ -107,14 +138,12 @@ def get_high_protein_expression(ensembl_gene_id):
             levels = data.findall('level[@type="expression"]')
             if tissue is not None and any(level.text.strip().lower() == "high" for level in levels):
                 high_protein_expression.append(tissue.text)
-        high_protein_expression_string = ', '.join(high_protein_expression)
         if high_protein_expression:
-            print("High protein expression:", high_protein_expression_string.lower())
+            print(f"High protein expression: {', '.join(high_protein_expression).lower()}")
         else:
             print("Protein not highly expressed.")
 
 def get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated):
-    """Get Ensembl transcript ID using RefSeq transcript ID."""
     url = f"https://rest.ensembl.org/xrefs/symbol/homo_sapiens/{hgvs_cdna_transcript_id_truncated}?external_db=RefSeq_mRNA"
     headers = {"Content-Type": "application/json"}
     response = send_request(url, headers)
@@ -122,8 +151,7 @@ def get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated):
         data = response.json()
         for entry in data:
             if entry['type'] == 'transcript':
-                ensembl_transcript_id = entry['id']
-                return ensembl_transcript_id
+                return entry['id']
     return None
 
 def get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id):
@@ -134,14 +162,12 @@ def get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id):
     if response.status_code == 200:
         root = ET.fromstring(response.content)
         for item in root.findall('.//GBSeq'):
-            current_version_hgvs_cdna_transcript_id = item.find('GBSeq_accession-version').text
-            return current_version_hgvs_cdna_transcript_id
+            return item.find('GBSeq_accession-version').text
     else:
         print("Failed to retrieve current version data from NCBI.")
     return None
 
 def get_grch38_variant_position(hgvs_cdna_transcript_id):
-    """Get chromosome information from NCBI for a given RefSeq variant transcript ID."""
     def fetch_position(hgvs_cdna_transcript_id):
         encoded_identifier = quote(hgvs_cdna_transcript_id)
         url = f"https://www.ncbi.nlm.nih.gov/snp/?term={encoded_identifier}"
@@ -160,18 +186,14 @@ def get_grch38_variant_position(hgvs_cdna_transcript_id):
                             parts = entry_clean.split(' ')
                             for part in parts:
                                 if "GRCh38" in part:
-                                    # Extract the position part and ensure only numeric characters are kept
                                     position = part.split(':')[-1].replace('GRCh38', '').strip()
-                                    numeric_position = ''.join(filter(str.isdigit, position))
-                                    return numeric_position
+                                    return ''.join(filter(str.isdigit, position))
         return None
 
-    # First attempt with the given hgvs_cdna_transcript_id
     position = fetch_position(hgvs_cdna_transcript_id)
     if position:
         return position
 
-    # If not found, get the current version and try again
     current_version = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id.split(':')[0])
     if current_version:
         hgvs_cdna_transcript_id_updated = f"{current_version}:{hgvs_cdna_transcript_id.split(':')[1]}"
@@ -182,7 +204,6 @@ def get_grch38_variant_position(hgvs_cdna_transcript_id):
     return "GRCh38 chromosome information not found"
 
 def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position):
-    """Get detailed information for a given Ensembl transcript ID."""
     url = f"https://rest.ensembl.org/lookup/id/{ensembl_transcript_id}?expand=1"
     headers = {"Content-Type": "application/json"}
     response = send_request(url, headers)
@@ -205,7 +226,6 @@ def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant
         print("Failed to retrieve transcript details.")
 
 def get_protein_domains(ensembl_protein_id):
-    """Get protein domains for a given Ensembl protein ID."""
     url = f"https://rest.ensembl.org/overlap/translation/{ensembl_protein_id}"
     headers = {"Content-Type": "application/json"}
     response = send_request(url, headers)
@@ -219,7 +239,6 @@ def get_protein_domains(ensembl_protein_id):
         print("Failed to retrieve protein domains.")
 
 def get_rsID(hgvs_cdna_transcript_id):
-    """Get rsID from NCBI for a given RefSeq variant transcript ID."""
     def fetch_rsid(hgvs_cdna_transcript_id):
         url = "https://www.ncbi.nlm.nih.gov/snp/"
         params = {'term': hgvs_cdna_transcript_id}
@@ -228,16 +247,13 @@ def get_rsID(hgvs_cdna_transcript_id):
             soup = BeautifulSoup(response.text, 'html.parser')
             rsid_link = soup.find('a', href=lambda href: href and '/snp/rs' in href)
             if rsid_link:
-                rsID = rsid_link.text.strip()
-                return rsID
+                return rsid_link.text.strip()
         return None
 
-    # First attempt with the given hgvs_cdna_transcript_id
     rsID = fetch_rsid(hgvs_cdna_transcript_id)
     if rsID:
         return rsID
 
-    # If not found, get the current version and try again
     current_version = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id.split(':')[0])
     if current_version:
         hgvs_cdna_transcript_id_updated = f"{current_version}:{hgvs_cdna_transcript_id.split(':')[1]}"
@@ -247,9 +263,7 @@ def get_rsID(hgvs_cdna_transcript_id):
 
     return "rsID not found"
 
-
 def get_clinvar_data(rsID):
-    """Get data from ClinVar for a given rsID."""
     url = f"https://www.ncbi.nlm.nih.gov/clinvar/?term={rsID}"
     response = send_request(url)
     extracted_data = []
@@ -257,8 +271,8 @@ def get_clinvar_data(rsID):
         soup = BeautifulSoup(response.text, 'html.parser')
         tables = soup.find_all('table')
         
-        if len(tables) > 4:  # Ensure there are enough tables to access the desired one
-            correct_table = tables[4]  # Table 4 has the submissions germline data
+        if len(tables) > 4:
+            correct_table = tables[4]
             rows = correct_table.find_all('tr')
             
             for row in rows:
@@ -294,7 +308,7 @@ def get_clinvar_data(rsID):
 @capture_output
 def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
     print_header(gene_symbol)
-    cytogenetic_band = get_cytogenetic_band(gene_symbol)
+    get_cytogenetic_band(gene_symbol)
     ensembl_gene_id = get_ensembl_gene_id(gene_symbol)
     get_high_protein_expression(ensembl_gene_id)
     hgvs_cdna_transcript_id_truncated = truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)

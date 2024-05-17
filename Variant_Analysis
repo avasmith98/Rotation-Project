@@ -42,18 +42,23 @@ def split_and_style(line, normal_style):
         return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
     return Paragraph(line, normal_style)
 
+
+  
+  
+
 def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id):
     styles = getSampleStyleSheet()
     normal_style = styles['Normal']
     header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
     table_header_style = ParagraphStyle(name='TableHeaderStyle', parent=styles['Normal'], fontSize=12, fontName='Helvetica-Bold', alignment=1)
 
-    doc = SimpleDocTemplate(output_path, pagesize=letter)
+    doc = SimpleDocTemplate(output_path, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
     story = []
 
     for line in text.splitlines():
         if line.startswith("Variant Analysis Report:"):
             story.append(Paragraph(line, header_style))
+            story.append(Spacer(1, 12))
         elif line.startswith("Report generated on"):
             story.append(Paragraph(line, normal_style))
             story.append(Spacer(1, 12))
@@ -63,19 +68,24 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
             "Variant location:"
         ]):
             story.append(split_and_style(line, normal_style))
+            story.append(Spacer(1, 12))
         elif line.startswith("Source:"):
             story.append(Paragraph(line, normal_style))
+            story.append(Spacer(1, 12))
         else:
             story.append(Paragraph(line, normal_style))
+            story.append(Spacer(1, 12))
 
     # Add HGVS cDNA transcript IDs
     story.append(Paragraph(f"<b>HGVS cDNA Transcript ID:</b> {hgvs_cdna_transcript_id}", normal_style))
+    story.append(Spacer(1, 12))
     story.append(Paragraph(f"<b>Most Recent HGVS cDNA Transcript ID:</b> {most_recent_hgvs_cdna_transcript_id}", normal_style))
     story.append(Spacer(1, 12))
 
     # Add protein domains table
     if protein_domains:
         story.append(Paragraph("Protein Domain(s):", header_style))
+        story.append(Spacer(1, 12))
         data = [[Paragraph("Source", table_header_style), Paragraph("Description", table_header_style), Paragraph("Start", table_header_style), Paragraph("End", table_header_style)]]
         for domain in protein_domains:
             source = domain["Source"]
@@ -98,18 +108,21 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
             ('RIGHTPADDING', (0, 0), (-1, -1), 5)
         ]))
         story.append(table)
+        story.append(Spacer(1, 12))
     else:
         story.append(Paragraph("Protein Domain(s): Search Successful - No domains found", normal_style))
+        story.append(Spacer(1, 12))
 
     # Add ClinVar data table
     if clinvar_data:
         story.append(Paragraph("ClinVar Data:", header_style))
+        story.append(Spacer(1, 12))
         data = [
             [Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]
         ]
         for item in clinvar_data:
-            classification = Paragraph(item["Variant classification"])
-            condition = Paragraph(item["Variant condition"])
+            classification = Paragraph(item["Variant classification"], normal_style)
+            condition = Paragraph(item["Variant condition"], normal_style)
             more_info = Paragraph(item["Variant more info"], styles['BodyText'])
             data.append([classification, condition, more_info])
         table = Table(data, colWidths=[1.5 * inch, 1.5 * inch, 3.5 * inch], hAlign='LEFT')
@@ -127,8 +140,10 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
             ('RIGHTPADDING', (0, 0), (-1, -1), 5)
         ]))
         story.append(table)
+        story.append(Spacer(1, 12))
     else:
         story.append(Paragraph("ClinVar Data: No data found", normal_style))
+        story.append(Spacer(1, 12))
 
     try:
         doc.build(story)

@@ -7,6 +7,7 @@ from urllib.parse import quote
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
+from reportlab.lib.units import inch
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -39,10 +40,12 @@ def split_and_style(line, normal_style):
     if len(parts) > 1:
         return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
     return Paragraph(line, normal_style)
-def create_pdf_from_text(text, output_path, protein_domains):
+
+def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
     styles = getSampleStyleSheet()
     normal_style = styles['Normal']
     header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
+    table_header_style = ParagraphStyle(name='TableHeaderStyle', parent=styles['Normal'], fontSize=12, fontName='Helvetica-Bold', alignment=1)
 
     doc = SimpleDocTemplate(output_path, pagesize=letter)
     story = []
@@ -56,8 +59,7 @@ def create_pdf_from_text(text, output_path, protein_domains):
         elif any(line.startswith(prefix) for prefix in [
             "Cytogenetic band:", "High protein expression:", "Transcript length:", 
             "Translation length:", "Total number of exons:", "Number of coding exons:", 
-            "Variant location:", "Variant classification:", "Variant condition:", 
-            "Variant more info:"
+            "Variant location:"
         ]):
             story.append(split_and_style(line, normal_style))
         elif line.startswith("Source:"):
@@ -68,30 +70,65 @@ def create_pdf_from_text(text, output_path, protein_domains):
     # Add protein domains table
     if protein_domains:
         story.append(Paragraph("Protein Domain(s):", header_style))
-        data = [["Source", "Description", "Start", "End"]]
+        data = [[Paragraph("Source", table_header_style), Paragraph("Description", table_header_style), Paragraph("Start", table_header_style), Paragraph("End", table_header_style)]]
         for domain in protein_domains:
-            data.append([domain["Source"], domain["Description"], domain["Start"], domain["End"]])
-        table = Table(data, hAlign='LEFT')
+            source = domain["Source"]
+            description = Paragraph(domain["Description"], styles['BodyText'])  # Wrap text in Paragraph
+            start = domain["Start"]
+            end = domain["End"]
+            data.append([source, description, start, end])
+        table = Table(data, colWidths=[1.0 * inch, 3.0 * inch, 1.0 * inch, 1.0 * inch], hAlign='LEFT')
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5)
         ]))
         story.append(table)
     else:
-        story.append(Paragraph("Protein Domain(s): No domains found", normal_style))
+        story.append(Paragraph("Protein Domain(s): Search Successful - No domains found", normal_style))
+
+    # Add ClinVar data table
+    if clinvar_data:
+        story.append(Paragraph("ClinVar Data:", header_style))
+        data = [
+            [Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]
+        ]
+        for item in clinvar_data:
+            classification = Paragraph(item["Variant classification"])
+            condition = Paragraph(item["Variant condition"])
+            more_info = Paragraph(item["Variant more info"], styles['BodyText'])
+            data.append([classification, condition, more_info])
+        table = Table(data, colWidths=[1.5 * inch, 1.5 * inch, 3.5 * inch], hAlign='LEFT')
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5)
+        ]))
+        story.append(table)
+    else:
+        story.append(Paragraph("ClinVar Data: No data found", normal_style))
 
     try:
         doc.build(story)
     except PermissionError as e:
         print(f"Error: {e}")
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
-
 
 def print_header(gene_symbol):
     print(f"Variant Analysis Report: {gene_symbol}")
@@ -330,19 +367,27 @@ def get_clinvar_data(rsID):
                         'Variant more info': more_info
                     })
 
-            if extracted_data:
-                for data in extracted_data:
-                    for key, value in data.items():
-                        value = ' '.join(value.split())
-                        print(f"{key}: {value}")
-            else:
-                print("No data extracted from the rows.")
+            if not extracted_data:
+                extracted_data.append({
+                    'Variant classification': 'No data',
+                    'Variant condition': 'No data',
+                    'Variant more info': 'No data'
+                })
         else:
-            print("No ClinVar submissions found for this rsID.")
+            extracted_data.append({
+                'Variant classification': 'No ClinVar submissions found for this rsID.',
+                'Variant condition': '',
+                'Variant more info': ''
+            })
     else:
-        print("Failed to retrieve data from ClinVar.")
+        extracted_data.append({
+            'Variant classification': 'Failed to retrieve data from ClinVar.',
+            'Variant condition': '',
+            'Variant more info': ''
+        })
 
-@capture_output
+    return extracted_data
+
 def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
     print_header(gene_symbol)
     get_cytogenetic_band(gene_symbol)
@@ -354,11 +399,20 @@ def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcrip
     ensembl_protein_id = get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position)
     protein_domains = get_protein_domains(ensembl_protein_id)
     rsID = get_rsID(hgvs_cdna_transcript_id)
-    get_clinvar_data(rsID)
-    return protein_domains
+    clinvar_data = get_clinvar_data(rsID)
+    return protein_domains, clinvar_data
 
-captured_text, protein_domains = program(), program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
+def capture_output_and_return_value(func, *args, **kwargs):
+    output_buffer = io.StringIO()
+    sys.stdout = output_buffer
+    result = func(*args, **kwargs)
+    sys.stdout = sys.__stdout__
+    captured_text = output_buffer.getvalue()
+    return captured_text, result
 
-captured_text = program()
-protein_domains = get_protein_domains(get_transcript_details_and_ensembl_protein_id(get_ensembl_transcript_id(truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)), int(get_grch38_variant_position(hgvs_cdna_transcript_id))))
-create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains)
+@capture_output
+def program_wrapper(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
+    return program(gene_symbol, hgvs_cdna_transcript_id)
+
+captured_text, (protein_domains, clinvar_data) = capture_output_and_return_value(program, gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
+create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains, clinvar_data)

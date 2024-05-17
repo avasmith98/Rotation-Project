@@ -2,27 +2,22 @@ import sys
 import io
 import datetime
 import requests
+import os
 import re
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
 from xml.etree import ElementTree as ET
+from flask import Flask, request, render_template_string
+import threading
 
-# Pick below for testing
+# Set gene_symbol and hgvs_cdna_transcript_id for testing
 gene_symbol = "NLGN4X"
 hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
-
-#gene_symbol = "EGFR"
-#hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
-
-#gene_symbol = "KCNMA1"
-#hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
 
 output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice_Case\{gene_symbol}.pdf"
 
@@ -41,10 +36,6 @@ def split_and_style(line, normal_style):
     if len(parts) > 1:
         return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
     return Paragraph(line, normal_style)
-
-
-  
-  
 
 def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id):
     styles = getSampleStyleSheet()
@@ -67,7 +58,7 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
             "Translation length:", "Total number of exons:", "Number of coding exons:", 
             "Variant location:"
         ]):
-            story.append(split_and_style(line, normal_style))
+            story.append(Paragraph(line, normal_style))
             story.append(Spacer(1, 12))
         elif line.startswith("Source:"):
             story.append(Paragraph(line, normal_style))
@@ -115,7 +106,7 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
 
     # Add ClinVar data table
     if clinvar_data:
-        story.append(Paragraph("ClinVar Data:", header_style))
+        story.append(Paragraph("ClinVar:", header_style))
         story.append(Spacer(1, 12))
         data = [
             [Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]
@@ -147,10 +138,10 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
 
     try:
         doc.build(story)
+        print(f"PDF successfully created at {output_path}")
     except PermissionError as e:
         print(f"Error: {e}")
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
-
 
 def print_header(gene_symbol):
     full_gene_name = get_full_gene_name(gene_symbol)
@@ -442,6 +433,8 @@ def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcrip
     most_recent_hgvs_cdna_transcript_id = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
     return protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id
 
+
+# Function to capture output and return the captured text and result
 def capture_output_and_return_value(func, *args, **kwargs):
     output_buffer = io.StringIO()
     sys.stdout = output_buffer
@@ -450,9 +443,54 @@ def capture_output_and_return_value(func, *args, **kwargs):
     captured_text = output_buffer.getvalue()
     return captured_text, result
 
-@capture_output
-def program_wrapper(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
-    return program(gene_symbol, hgvs_cdna_transcript_id)
+# HTML template for the form
+html_template = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gene Variant PDF Generator</title>
+</head>
+<body>
+    <h1>Gene Variant PDF Generator</h1>
+    <form method="POST">
+        Gene Symbol: <input type="text" name="gene_symbol"><br><br>
+        HGVS cDNA Transcript ID: <input type="text" name="hgvs_cdna_transcript_id"><br><br>
+        <input type="submit" value="Generate PDF">
+    </form>
+    {% if output %}
+    <h2>Output:</h2>
+    <pre>{{ output }}</pre>
+    {% endif %}
+</body>
+</html>
+"""
 
-captured_text, (protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id) = capture_output_and_return_value(program, gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
-create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id)
+# Create Flask app
+app = Flask(__name__)
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    output = None
+    if request.method == 'POST':
+        gene_symbol = request.form['gene_symbol']
+        hgvs_cdna_transcript_id = request.form['hgvs_cdna_transcript_id']
+        output_pdf_file_path = f"{gene_symbol}.pdf"
+        
+        # Capture the output and get the result
+        captured_text, (protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id) = capture_output_and_return_value(
+            program, gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
+        
+        # Create the PDF
+        create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id)
+        
+        # Suppress detailed output and display confirmation message
+        output = f"PDF generated successfully: {output_pdf_file_path}"
+    
+    return render_template_string(html_template, output=output)
+
+def run_flask_app():
+    app.run(debug=True, use_reloader=False)
+
+# Run Flask app in a separate thread
+flask_thread = threading.Thread(target=run_flask_app)
+flask_thread.start()

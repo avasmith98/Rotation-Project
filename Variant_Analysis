@@ -13,16 +13,16 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from xml.etree import ElementTree as ET
 
 # Pick below for testing
-# gene_symbol = "NLGN4X"
-# hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
+#gene_symbol = "NLGN4X"
+#hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
 
-gene_symbol = "EGFR"
-hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
+#gene_symbol = "EGFR"
+#hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
 
-# gene_symbol = "KCNMA1"
-# hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
+gene_symbol = "KCNMA1"
+hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
 
-output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice Case\{gene_symbol}.pdf"
+output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice_Case\{gene_symbol}.pdf"
 
 def capture_output(func):
     def wrapper(*args, **kwargs):
@@ -39,8 +39,7 @@ def split_and_style(line, normal_style):
     if len(parts) > 1:
         return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
     return Paragraph(line, normal_style)
-
-def create_pdf_from_text(text, output_path):
+def create_pdf_from_text(text, output_path, protein_domains):
     styles = getSampleStyleSheet()
     normal_style = styles['Normal']
     header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
@@ -58,7 +57,7 @@ def create_pdf_from_text(text, output_path):
             "Cytogenetic band:", "High protein expression:", "Transcript length:", 
             "Translation length:", "Total number of exons:", "Number of coding exons:", 
             "Variant location:", "Variant classification:", "Variant condition:", 
-            "Variant more info:", "Protein Domain(s):"
+            "Variant more info:"
         ]):
             story.append(split_and_style(line, normal_style))
         elif line.startswith("Source:"):
@@ -66,11 +65,33 @@ def create_pdf_from_text(text, output_path):
         else:
             story.append(Paragraph(line, normal_style))
 
+    # Add protein domains table
+    if protein_domains:
+        story.append(Paragraph("Protein Domain(s):", header_style))
+        data = [["Source", "Description", "Start", "End"]]
+        for domain in protein_domains:
+            data.append([domain["Source"], domain["Description"], domain["Start"], domain["End"]])
+        table = Table(data, hAlign='LEFT')
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(table)
+    else:
+        story.append(Paragraph("Protein Domain(s): No domains found", normal_style))
+
     try:
         doc.build(story)
     except PermissionError as e:
         print(f"Error: {e}")
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
+
 
 def print_header(gene_symbol):
     print(f"Variant Analysis Report: {gene_symbol}")
@@ -225,14 +246,34 @@ def get_protein_domains(ensembl_protein_id):
     url = f"https://rest.ensembl.org/overlap/translation/{ensembl_protein_id}"
     headers = {"Content-Type": "application/json"}
     response = send_request(url, headers)
+    domains = []
     if response:
-        domains = response.json()
-        print("Protein Domain(s):")
-        for domain in domains:
-            if domain.get('type') in ['Pfam', 'Smart']:
-                print(f"Source: {domain['type']}, Description: {domain.get('description', 'No description available')}, Start: {domain['start']}, End: {domain['end']}")
+        domain_data = response.json()
+        if domain_data:
+            for domain in domain_data:
+                if domain.get('type') in ['Pfam', 'Smart']:
+                    domains.append({
+                        "Source": domain['type'],
+                        "Description": domain.get('description', 'No description available'),
+                        "Start": domain['start'],
+                        "End": domain['end']
+                    })
+        if not domains:
+            domains.append({
+                "Source": "Retrieval successful - No domains found",
+                "Description": "",
+                "Start": "",
+                "End": ""
+            })
     else:
-        print("Failed to retrieve protein domains.")
+        domains.append({
+            "Source": "Failed to retrieve protein domains",
+            "Description": "",
+            "Start": "",
+            "End": ""
+        })
+    return domains
+
 
 def get_rsID(hgvs_cdna_transcript_id):
     def fetch_rsid(hgvs_cdna_transcript_id):
@@ -311,10 +352,13 @@ def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcrip
     ensembl_transcript_id = get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated)
     variant_position = int(get_grch38_variant_position(hgvs_cdna_transcript_id))
     ensembl_protein_id = get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position)
-    get_protein_domains(ensembl_protein_id)
+    protein_domains = get_protein_domains(ensembl_protein_id)
     rsID = get_rsID(hgvs_cdna_transcript_id)
     get_clinvar_data(rsID)
+    return protein_domains
+
+captured_text, protein_domains = program(), program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
 
 captured_text = program()
-create_pdf_from_text(captured_text, output_pdf_file_path)
-
+protein_domains = get_protein_domains(get_transcript_details_and_ensembl_protein_id(get_ensembl_transcript_id(truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)), int(get_grch38_variant_position(hgvs_cdna_transcript_id))))
+create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains)

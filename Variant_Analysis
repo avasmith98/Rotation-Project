@@ -1,3 +1,7 @@
+"""PDF saves to the current working directory of the Python process running the Flask server. To check where, run this in console
+import os
+print("Current working directory:", os.getcwd())
+"""
 import sys
 import io
 import datetime

@@ -14,14 +14,14 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from xml.etree import ElementTree as ET
 
 # Pick below for testing
-#gene_symbol = "NLGN4X"
-#hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
+gene_symbol = "NLGN4X"
+hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
 
 #gene_symbol = "EGFR"
 #hgvs_cdna_transcript_id = "NM_005228.3:c.2648T>C"
 
-gene_symbol = "KCNMA1"
-hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
+#gene_symbol = "KCNMA1"
+#hgvs_cdna_transcript_id = "NM_001014797.2:c.2996A>G"
 
 output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice_Case\{gene_symbol}.pdf"
 
@@ -97,7 +97,7 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
 
     # Add ClinVar data table
     if clinvar_data:
-        story.append(Paragraph("ClinVar Data:", header_style))
+        story.append(Paragraph(ClinVar:", header_style))
         data = [
             [Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]
         ]
@@ -195,7 +195,10 @@ def get_high_protein_expression(ensembl_gene_id):
         if high_protein_expression:
             print(f"High protein expression: {', '.join(high_protein_expression).lower()}")
         else:
-            print("Protein not highly expressed.")
+            print("High protein expression: Protein not highly expressed.")
+    else:
+        print("High protein expression: Data retrieval failed.")
+
 
 def get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated):
     url = f"https://rest.ensembl.org/xrefs/symbol/homo_sapiens/{hgvs_cdna_transcript_id_truncated}?external_db=RefSeq_mRNA"

@@ -2,6 +2,7 @@ import sys
 import io
 import datetime
 import requests
+import re
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 from reportlab.lib.pagesizes import letter
@@ -97,7 +98,7 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
 
     # Add ClinVar data table
     if clinvar_data:
-        story.append(Paragraph(ClinVar:", header_style))
+        story.append(Paragraph("ClinVar Data:", header_style))
         data = [
             [Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]
         ]
@@ -131,7 +132,8 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
 
 def print_header(gene_symbol):
-    print(f"Variant Analysis Report: {gene_symbol}")
+    full_gene_name = get_full_gene_name(gene_symbol)
+    print(f"Variant Analysis Report: {gene_symbol} ({full_gene_name})")
     print(f"Report generated on {datetime.date.today().strftime('%B %d, %Y')}")
 
 def send_request(url, headers=None, params=None):
@@ -198,7 +200,6 @@ def get_high_protein_expression(ensembl_gene_id):
             print("High protein expression: Protein not highly expressed.")
     else:
         print("High protein expression: Data retrieval failed.")
-
 
 def get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated):
     url = f"https://rest.ensembl.org/xrefs/symbol/homo_sapiens/{hgvs_cdna_transcript_id_truncated}?external_db=RefSeq_mRNA"
@@ -314,7 +315,6 @@ def get_protein_domains(ensembl_protein_id):
         })
     return domains
 
-
 def get_rsID(hgvs_cdna_transcript_id):
     def fetch_rsid(hgvs_cdna_transcript_id):
         url = "https://www.ncbi.nlm.nih.gov/snp/"
@@ -390,6 +390,21 @@ def get_clinvar_data(rsID):
         })
 
     return extracted_data
+
+def get_full_gene_name(gene_symbol):
+    url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}"
+    headers = {"Content-Type": "application/json"}
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        data = response.json()
+        description = data.get("description", "Full gene name not available")
+        # Extract the part before any additional information in brackets
+        match = re.match(r"([^[]+)", description)
+        full_gene_name = match.group(1).strip() if match else "Full gene name not available"
+        return full_gene_name
+    else:
+        return f"Failed to retrieve data for {gene_symbol}"
 
 def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
     print_header(gene_symbol)

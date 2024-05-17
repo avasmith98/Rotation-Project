@@ -42,7 +42,7 @@ def split_and_style(line, normal_style):
         return Paragraph(f"<b>{parts[0]}:</b> {parts[1].strip()}", normal_style)
     return Paragraph(line, normal_style)
 
-def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
+def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id):
     styles = getSampleStyleSheet()
     normal_style = styles['Normal']
     header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
@@ -67,6 +67,11 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
             story.append(Paragraph(line, normal_style))
         else:
             story.append(Paragraph(line, normal_style))
+
+    # Add HGVS cDNA transcript IDs
+    story.append(Paragraph(f"<b>HGVS cDNA Transcript ID:</b> {hgvs_cdna_transcript_id}", normal_style))
+    story.append(Paragraph(f"<b>Most Recent HGVS cDNA Transcript ID:</b> {most_recent_hgvs_cdna_transcript_id}", normal_style))
+    story.append(Spacer(1, 12))
 
     # Add protein domains table
     if protein_domains:
@@ -130,6 +135,7 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data):
     except PermissionError as e:
         print(f"Error: {e}")
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
+
 
 def print_header(gene_symbol):
     full_gene_name = get_full_gene_name(gene_symbol)
@@ -418,7 +424,8 @@ def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcrip
     protein_domains = get_protein_domains(ensembl_protein_id)
     rsID = get_rsID(hgvs_cdna_transcript_id)
     clinvar_data = get_clinvar_data(rsID)
-    return protein_domains, clinvar_data
+    most_recent_hgvs_cdna_transcript_id = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
+    return protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id
 
 def capture_output_and_return_value(func, *args, **kwargs):
     output_buffer = io.StringIO()
@@ -432,5 +439,5 @@ def capture_output_and_return_value(func, *args, **kwargs):
 def program_wrapper(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
     return program(gene_symbol, hgvs_cdna_transcript_id)
 
-captured_text, (protein_domains, clinvar_data) = capture_output_and_return_value(program, gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
-create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains, clinvar_data)
+captured_text, (protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id) = capture_output_and_return_value(program, gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id)
+create_pdf_from_text(captured_text, output_pdf_file_path, protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id)

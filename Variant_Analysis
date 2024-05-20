@@ -2,7 +2,6 @@ import sys
 import io
 import datetime
 import requests
-import os
 import re
 from bs4 import BeautifulSoup
 from urllib.parse import quote
@@ -15,21 +14,24 @@ from xml.etree import ElementTree as ET
 from flask import Flask, request, render_template_string
 import threading
 
-# Set gene_symbol and hgvs_cdna_transcript_id for testing
-gene_symbol = "NLGN4X"
-hgvs_cdna_transcript_id = "NM_001282145:c.302G>A"
+gene_symbol = ""
+hgvs_cdna_transcript_id = ""
 
-output_pdf_file_path = fr"C:\Users\anmbh\OneDrive\Documents\PhD_Thesis_Work\Practice_Case\{gene_symbol}.pdf"
+def send_request(url, headers=None, params=None):
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response
+    except requests.RequestException as e:
+        print(f"Failed to retrieve data from {url}: {e}")
+        return None
 
-def capture_output(func):
-    def wrapper(*args, **kwargs):
-        output_buffer = io.StringIO()
+def capture_output_and_return_value(func, *args, **kwargs):
+    with io.StringIO() as output_buffer:
         sys.stdout = output_buffer
-        func(*args, **kwargs)
-        captured_text = output_buffer.getvalue()
+        result = func(*args, **kwargs)
         sys.stdout = sys.__stdout__
-        return captured_text
-    return wrapper
+        return output_buffer.getvalue(), result
 
 def split_and_style(line, normal_style):
     parts = line.split(':', 1)
@@ -42,30 +44,21 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
     normal_style = styles['Normal']
     header_style = ParagraphStyle(name='HeaderStyle', parent=styles['Heading1'], fontSize=14, spaceAfter=10)
     table_header_style = ParagraphStyle(name='TableHeaderStyle', parent=styles['Normal'], fontSize=12, fontName='Helvetica-Bold', alignment=1)
-
     doc = SimpleDocTemplate(output_path, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
     story = []
 
     for line in text.splitlines():
         if line.startswith("Variant Analysis Report:"):
             story.append(Paragraph(line, header_style))
-            story.append(Spacer(1, 12))
         elif line.startswith("Report generated on"):
             story.append(Paragraph(line, normal_style))
-            story.append(Spacer(1, 12))
-        elif any(line.startswith(prefix) for prefix in [
-            "Cytogenetic band:", "High protein expression:", "Transcript length:", 
-            "Translation length:", "Total number of exons:", "Number of coding exons:", 
-            "Variant location:"
-        ]):
+        elif any(line.startswith(prefix) for prefix in ["Cytogenetic band:", "High protein expression:", "Transcript length:", "Translation length:", "Total number of exons:", "Number of coding exons:", "Variant location:"]):
             story.append(Paragraph(line, normal_style))
-            story.append(Spacer(1, 12))
         elif line.startswith("Source:"):
             story.append(Paragraph(line, normal_style))
-            story.append(Spacer(1, 12))
         else:
             story.append(Paragraph(line, normal_style))
-            story.append(Spacer(1, 12))
+        story.append(Spacer(1, 12))
 
     # Add HGVS cDNA transcript IDs
     story.append(Paragraph(f"<b>HGVS cDNA Transcript ID:</b> {hgvs_cdna_transcript_id}", normal_style))
@@ -79,25 +72,9 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
         story.append(Spacer(1, 12))
         data = [[Paragraph("Source", table_header_style), Paragraph("Description", table_header_style), Paragraph("Start", table_header_style), Paragraph("End", table_header_style)]]
         for domain in protein_domains:
-            source = domain["Source"]
-            description = Paragraph(domain["Description"], styles['BodyText'])  # Wrap text in Paragraph
-            start = domain["Start"]
-            end = domain["End"]
-            data.append([source, description, start, end])
+            data.append([domain["Source"], Paragraph(domain["Description"], styles['BodyText']), domain["Start"], domain["End"]])
         table = Table(data, colWidths=[1.0 * inch, 3.0 * inch, 1.0 * inch, 1.0 * inch], hAlign='LEFT')
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5)
-        ]))
+        table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.grey), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 12), ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 5), ('RIGHTPADDING', (0, 0), (-1, -1), 5)]))
         story.append(table)
         story.append(Spacer(1, 12))
     else:
@@ -108,28 +85,11 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
     if clinvar_data:
         story.append(Paragraph("ClinVar:", header_style))
         story.append(Spacer(1, 12))
-        data = [
-            [Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]
-        ]
+        data = [[Paragraph("Variant classification", table_header_style), Paragraph("Variant condition", table_header_style), Paragraph("Variant more info", table_header_style)]]
         for item in clinvar_data:
-            classification = Paragraph(item["Variant classification"], normal_style)
-            condition = Paragraph(item["Variant condition"], normal_style)
-            more_info = Paragraph(item["Variant more info"], styles['BodyText'])
-            data.append([classification, condition, more_info])
+            data.append([Paragraph(item["Variant classification"], normal_style), Paragraph(item["Variant condition"], normal_style), Paragraph(item["Variant more info"], styles['BodyText'])])
         table = Table(data, colWidths=[1.5 * inch, 1.5 * inch, 3.5 * inch], hAlign='LEFT')
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5)
-        ]))
+        table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.grey), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 12), ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 5), ('RIGHTPADDING', (0, 0), (-1, -1), 5)]))
         story.append(table)
         story.append(Spacer(1, 12))
     else:
@@ -143,46 +103,41 @@ def create_pdf_from_text(text, output_path, protein_domains, clinvar_data, hgvs_
         print(f"Error: {e}")
         print(f"Permission denied. The file '{output_path}' might be open in another application. Please close the file and try again.")
 
+def get_full_gene_name(gene_symbol):
+    url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}"
+    headers = {"Content-Type": "application/json"}
+    response = send_request(url, headers=headers)
+    if response:
+        description = response.json().get("description", "Full gene name not available")
+        match = re.match(r"([^[]+)", description)
+        return match.group(1).strip() if match else "Full gene name not available"
+    return f"Failed to retrieve data for {gene_symbol}"
+
 def print_header(gene_symbol):
     full_gene_name = get_full_gene_name(gene_symbol)
-    print(f"Variant Analysis Report: {gene_symbol} ({full_gene_name})")
-    print(f"Report generated on {datetime.date.today().strftime('%B %d, %Y')}")
-
-def send_request(url, headers=None, params=None):
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        return response
-    except requests.RequestException as e:
-        print(f"Failed to retrieve data from {url}: {e}")
-        return None
+    header = f"Variant Analysis Report: {gene_symbol} ({full_gene_name})\nReport generated on {datetime.date.today().strftime('%B %d, %Y')}"
+    print(header)
 
 def truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id):
     return hgvs_cdna_transcript_id.split(':')[0].split('.')[0]
 
 def get_cytogenetic_band(gene_symbol):
     search_url = f'https://api.genome.ucsc.edu/search?search={gene_symbol}&genome=hg38'
-    search_response = requests.get(search_url)
-    search_data = search_response.json()
-
+    search_response = send_request(search_url)
+    search_data = search_response.json() if search_response else {}
     try:
         for match in search_data['positionMatches'][0]['matches']:
             if gene_symbol in match['posName'] and 'ENST' in match['hgFindMatches']:
                 position = match['position']
                 chrom, pos_range = position.split(':')
                 start, end = pos_range.split('-')
-
                 track_url = f'https://api.genome.ucsc.edu/getData/track?track=cytoBand;genome=hg38;chrom={chrom};start={start};end={end}'
-                track_response = requests.get(track_url)
-                track_data = track_response.json()
-
+                track_response = send_request(track_url)
+                track_data = track_response.json() if track_response else {}
                 cytogenetic_band = track_data.get('cytoBand', 'Band not found')
                 chromosome = cytogenetic_band[0]['chrom'][3:]
                 cytoband = cytogenetic_band[0]['name']
-                cytogenetic_band = chromosome + cytoband
-                print(f"Cytogenetic band: {cytogenetic_band}")
-                break
-
+                return chromosome + cytoband
     except (IndexError, KeyError) as e:
         print(f"Error handling API response: {e}")
         return "Gene symbol not found or data incomplete."
@@ -191,9 +146,7 @@ def get_ensembl_gene_id(gene_symbol):
     url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}"
     headers = {"Content-Type": "application/json"}
     response = send_request(url, headers)
-    if response:
-        return response.json().get("id")
-    return None
+    return response.json().get("id") if response else None
 
 def get_high_protein_expression(ensembl_gene_id):
     url = f"https://www.proteinatlas.org/{ensembl_gene_id}.xml"
@@ -206,12 +159,7 @@ def get_high_protein_expression(ensembl_gene_id):
             levels = data.findall('level[@type="expression"]')
             if tissue is not None and any(level.text.strip().lower() == "high" for level in levels):
                 high_protein_expression.append(tissue.text)
-        if high_protein_expression:
-            print(f"High protein expression: {', '.join(high_protein_expression).lower()}")
-        else:
-            print("High protein expression: Protein not highly expressed.")
-    else:
-        print("High protein expression: Data retrieval failed.")
+    return high_protein_expression if high_protein_expression else ["Protein not highly expressed"]
 
 def get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated):
     url = f"https://rest.ensembl.org/xrefs/symbol/homo_sapiens/{hgvs_cdna_transcript_id_truncated}?external_db=RefSeq_mRNA"
@@ -226,51 +174,35 @@ def get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated):
 
 def get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id):
     hgvs_cdna_transcript_id_truncated = truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
-    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    fetch_url = f"{base_url}efetch.fcgi?db=nucleotide&id={hgvs_cdna_transcript_id_truncated}&rettype=gb&retmode=xml"
-    response = requests.get(fetch_url)
-    if response.status_code == 200:
+    fetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id={hgvs_cdna_transcript_id_truncated}&rettype=gb&retmode=xml"
+    response = send_request(fetch_url)
+    if response:
         root = ET.fromstring(response.content)
-        for item in root.findall('.//GBSeq'):
-            return item.find('GBSeq_accession-version').text
-    else:
-        print("Failed to retrieve current version data from NCBI.")
+        return next((item.find('GBSeq_accession-version').text for item in root.findall('.//GBSeq')), None)
     return None
 
 def get_grch38_variant_position(hgvs_cdna_transcript_id):
     def fetch_position(hgvs_cdna_transcript_id):
-        encoded_identifier = quote(hgvs_cdna_transcript_id)
-        url = f"https://www.ncbi.nlm.nih.gov/snp/?term={encoded_identifier}"
+        url = f"https://www.ncbi.nlm.nih.gov/snp/?term={quote(hgvs_cdna_transcript_id)}"
         response = send_request(url)
-        
         if response:
             soup = BeautifulSoup(response.text, 'html.parser')
-            dt_tags = soup.find_all('dt')
-            for dt in dt_tags:
+            for dt in soup.find_all('dt'):
                 if dt.text.strip() == "Chromosome:":
                     dd_tag = dt.find_next('dd')
                     entries = dd_tag.decode_contents().split('<br/>')
                     for entry in entries:
                         if "GRCh38" in entry:
                             entry_clean = BeautifulSoup(entry, 'html.parser').text.strip()
-                            parts = entry_clean.split(' ')
-                            for part in parts:
-                                if "GRCh38" in part:
-                                    position = part.split(':')[-1].replace('GRCh38', '').strip()
-                                    return ''.join(filter(str.isdigit, position))
+                            return ''.join(filter(str.isdigit, entry_clean.split(' ')[-1].replace('GRCh38', '').strip()))
         return None
 
     position = fetch_position(hgvs_cdna_transcript_id)
     if position:
         return position
-
     current_version = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id.split(':')[0])
     if current_version:
-        hgvs_cdna_transcript_id_updated = f"{current_version}:{hgvs_cdna_transcript_id.split(':')[1]}"
-        position = fetch_position(hgvs_cdna_transcript_id_updated)
-        if position:
-            return position
-
+        return fetch_position(f"{current_version}:{hgvs_cdna_transcript_id.split(':')[1]}")
     return "GRCh38 chromosome information not found"
 
 def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position):
@@ -279,21 +211,18 @@ def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant
     response = send_request(url, headers)
     if response:
         data = response.json()
-        transcript_length = data.get('length', 'Transcript Length not available')
         translation = data.get('Translation', {})
-        translation_length = translation.get('length', 'Translation length not available')
-        total_exons = len(data['Exon']) if 'Exon' in data else 0
-        coding_exons = sum(1 for exon in data['Exon'] if exon['start'] <= translation.get('end', 0) and exon['end'] >= translation.get('start', float('inf')))
+        coding_exons = [exon for exon in data.get('Exon', []) if exon['start'] <= translation.get('end', 0) and exon['end'] >= translation.get('start', float('inf'))]
         exon_number = next((index for index, exon in enumerate(data.get('Exon', []), start=1) if exon['start'] <= variant_position <= exon['end']), None)
-        ensembl_protein_id = data['Translation']['id']
-        print(f"Transcript length: {transcript_length}")
-        print(f"Translation length: {translation_length}")
-        print(f"Total number of exons: {total_exons}")
-        print(f"Number of coding exons: {coding_exons}")
-        print(f"Variant location: exon {exon_number} of {coding_exons}")
-        return ensembl_protein_id
-    else:
-        print("Failed to retrieve transcript details.")
+        return {
+            "transcript_length": data.get('length', 'Transcript Length not available'),
+            "translation_length": translation.get('length', 'Translation length not available'),
+            "total_exons": len(data.get('Exon', [])),
+            "coding_exons": len(coding_exons),
+            "exon_number": exon_number,
+            "ensembl_protein_id": translation['id']
+        }
+    return None
 
 def get_protein_domains(ensembl_protein_id):
     url = f"https://rest.ensembl.org/overlap/translation/{ensembl_protein_id}"
@@ -301,26 +230,17 @@ def get_protein_domains(ensembl_protein_id):
     response = send_request(url, headers)
     domains = []
     if response:
-        domain_data = response.json()
-        if domain_data:
-            for domain in domain_data:
-                if domain.get('type') in ['Pfam', 'Smart']:
-                    domains.append({
-                        "Source": domain['type'],
-                        "Description": domain.get('description', 'No description available'),
-                        "Start": domain['start'],
-                        "End": domain['end']
-                    })
-        if not domains:
-            domains.append({
-                "Source": "Retrieval successful - No domains found",
-                "Description": "",
-                "Start": "",
-                "End": ""
-            })
-    else:
+        for domain in response.json():
+            if domain.get('type') in ['Pfam', 'Smart']:
+                domains.append({
+                    "Source": domain['type'],
+                    "Description": domain.get('description', 'No description available'),
+                    "Start": domain['start'],
+                    "End": domain['end']
+                })
+    if not domains:
         domains.append({
-            "Source": "Failed to retrieve protein domains",
+            "Source": "Retrieval successful - No domains found",
             "Description": "",
             "Start": "",
             "End": ""
@@ -330,8 +250,7 @@ def get_protein_domains(ensembl_protein_id):
 def get_rsID(hgvs_cdna_transcript_id):
     def fetch_rsid(hgvs_cdna_transcript_id):
         url = "https://www.ncbi.nlm.nih.gov/snp/"
-        params = {'term': hgvs_cdna_transcript_id}
-        response = send_request(url, params=params)
+        response = send_request(url, params={'term': hgvs_cdna_transcript_id})
         if response:
             soup = BeautifulSoup(response.text, 'html.parser')
             rsid_link = soup.find('a', href=lambda href: href and '/snp/rs' in href)
@@ -342,14 +261,9 @@ def get_rsID(hgvs_cdna_transcript_id):
     rsID = fetch_rsid(hgvs_cdna_transcript_id)
     if rsID:
         return rsID
-
     current_version = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id.split(':')[0])
     if current_version:
-        hgvs_cdna_transcript_id_updated = f"{current_version}:{hgvs_cdna_transcript_id.split(':')[1]}"
-        rsID = fetch_rsid(hgvs_cdna_transcript_id_updated)
-        if rsID:
-            return rsID
-
+        return fetch_rsid(f"{current_version}:{hgvs_cdna_transcript_id.split(':')[1]}")
     return "rsID not found"
 
 def get_clinvar_data(rsID):
@@ -359,89 +273,49 @@ def get_clinvar_data(rsID):
     if response:
         soup = BeautifulSoup(response.text, 'html.parser')
         tables = soup.find_all('table')
-        
         if len(tables) > 4:
-            correct_table = tables[4]
-            rows = correct_table.find_all('tr')
-            
+            rows = tables[4].find_all('tr')
             for row in rows:
                 cells = row.find_all('td')
                 if len(cells) >= 5:
                     classification_info = cells[0].text.strip()
                     condition_info = cells[2].text.strip()
-                    more_info = cells[4].text.strip()
-                    if "(more)" in more_info:
-                        more_info_parts = more_info.split("(more)")
-                        if len(more_info_parts) > 1:
-                            more_info = more_info_parts[1].strip()
-                    if "(less)" in more_info:
-                        more_info = more_info.replace("(less)", "").strip()
-                    extracted_data.append({
-                        'Variant classification': classification_info,
-                        'Variant condition': condition_info,
-                        'Variant more info': more_info
-                    })
-
+                    more_info = cells[4].text.strip().split("(more)")[1].strip() if "(more)" in cells[4].text else cells[4].text.strip()
+                    extracted_data.append({'Variant classification': classification_info, 'Variant condition': condition_info, 'Variant more info': more_info})
             if not extracted_data:
-                extracted_data.append({
-                    'Variant classification': 'No data',
-                    'Variant condition': 'No data',
-                    'Variant more info': 'No data'
-                })
+                extracted_data.append({'Variant classification': 'No data', 'Variant condition': 'No data', 'Variant more info': 'No data'})
         else:
-            extracted_data.append({
-                'Variant classification': 'No ClinVar submissions found for this rsID.',
-                'Variant condition': '',
-                'Variant more info': ''
-            })
+            extracted_data.append({'Variant classification': 'No ClinVar submissions found for this rsID.', 'Variant condition': '', 'Variant more info': ''})
     else:
-        extracted_data.append({
-            'Variant classification': 'Failed to retrieve data from ClinVar.',
-            'Variant condition': '',
-            'Variant more info': ''
-        })
-
+        extracted_data.append({'Variant classification': 'Failed to retrieve data from ClinVar.', 'Variant condition': '', 'Variant more info': ''})
     return extracted_data
 
-def get_full_gene_name(gene_symbol):
-    url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}"
-    headers = {"Content-Type": "application/json"}
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        data = response.json()
-        description = data.get("description", "Full gene name not available")
-        # Extract the part before any additional information in brackets
-        match = re.match(r"([^[]+)", description)
-        full_gene_name = match.group(1).strip() if match else "Full gene name not available"
-        return full_gene_name
-    else:
-        return f"Failed to retrieve data for {gene_symbol}"
-
-def program(gene_symbol=gene_symbol, hgvs_cdna_transcript_id=hgvs_cdna_transcript_id):
+def program(gene_symbol, hgvs_cdna_transcript_id):
     print_header(gene_symbol)
-    get_cytogenetic_band(gene_symbol)
     ensembl_gene_id = get_ensembl_gene_id(gene_symbol)
-    get_high_protein_expression(ensembl_gene_id)
     hgvs_cdna_transcript_id_truncated = truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
-    ensembl_transcript_id = get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated)
-    variant_position = int(get_grch38_variant_position(hgvs_cdna_transcript_id))
-    ensembl_protein_id = get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position)
-    protein_domains = get_protein_domains(ensembl_protein_id)
-    rsID = get_rsID(hgvs_cdna_transcript_id)
-    clinvar_data = get_clinvar_data(rsID)
-    most_recent_hgvs_cdna_transcript_id = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
-    return protein_domains, clinvar_data, hgvs_cdna_transcript_id, most_recent_hgvs_cdna_transcript_id
+    results = {
+        "cytogenetic_band": get_cytogenetic_band(gene_symbol),
+        "high_protein_expression": get_high_protein_expression(ensembl_gene_id),
+        "ensembl_transcript_id": get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated),
+        "variant_position": int(get_grch38_variant_position(hgvs_cdna_transcript_id)),
+        "most_recent_hgvs_cdna_transcript_id": get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
+    }
+    transcript_details = get_transcript_details_and_ensembl_protein_id(results["ensembl_transcript_id"], results["variant_position"])
+    results.update(transcript_details)
+    results["protein_domains"] = get_protein_domains(results["ensembl_protein_id"])
+    results["rsID"] = get_rsID(hgvs_cdna_transcript_id)
+    results["clinvar_data"] = get_clinvar_data(results["rsID"])
+    
+    print(f"Cytogenetic band: {results['cytogenetic_band']}")
+    print(f"High protein expression: {', '.join(results['high_protein_expression'])}")
+    print(f"Transcript length: {results['transcript_length']}")
+    print(f"Translation length: {results['translation_length']}")
+    print(f"Total number of exons: {results['total_exons']}")
+    print(f"Number of coding exons: {results['coding_exons']}")
+    print(f"Variant location: exon {results['exon_number']} of {results['coding_exons']}")
 
-
-# Function to capture output and return the captured text and result
-def capture_output_and_return_value(func, *args, **kwargs):
-    output_buffer = io.StringIO()
-    sys.stdout = output_buffer
-    result = func(*args, **kwargs)
-    sys.stdout = sys.__stdout__
-    captured_text = output_buffer.getvalue()
-    return captured_text, result
+    return results["protein_domains"], results["clinvar_data"], hgvs_cdna_transcript_id, results["most_recent_hgvs_cdna_transcript_id"]
 
 # HTML template for the form
 html_template = """

@@ -14,6 +14,7 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 from flask import Flask, request, render_template_string
 from xml.etree import ElementTree as ET
+#from Bio import Entrez
 
 def send_request(url, headers=None):
     try:
@@ -22,14 +23,6 @@ def send_request(url, headers=None):
         return response
     except: 
         print(f'Failed to retrieve data from {url}')
-
-def send_clinvar_request(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return response
-    except: 
-        print('No ClinVar entry associated with this rsID.')
 
 def get_report_date():
     report_date = datetime.date.today().strftime('%B %d, %Y')
@@ -152,6 +145,22 @@ def get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id_truncate
             for item in root.findall('.//GBSeq'):
                 current_version_hgvs_cdna_transcript_id = item.find('GBSeq_accession-version').text
                 return current_version_hgvs_cdna_transcript_id
+        except:
+            print(f'Retrieval from {url} successful. Error handling response.')
+
+def get_amino_acid_change(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_split, ensembl_transcript_id):
+    url = f"https://rest.ensembl.org/vep/human/hgvs/{current_version_hgvs_cdna_transcript_i}:{hgvs_cdna_transcript_id_split}"
+    headers = {"Content-Type": "application/json"}
+    response = send_request(url, headers=headers)
+    if response:
+        try:
+            data = response.json()
+            for consequence in data[0]['transcript_consequences']:
+                if consequence.get('transcript_id') == ensembl_transcript_id:
+                    protein_start = consequence.get('protein_start')
+                    protein_end = consequence.get('protein_end', 'Not specified')  
+                    amino_acid_change = consequence.get('amino_acids')
+            return protein_start, protein_end, amino_acid_change
         except:
             print(f'Retrieval from {url} successful. Error handling response.')
 
@@ -290,7 +299,7 @@ def get_clinvar(rsID):
                     if message_found:
                         print('No ClinVar record associated with this rsID.')
             except Exception as e_inner:
-                print(f'Additional error handling response from {url}: {e_inner}')
+                print(f'Retrieval from {url} successful. Error handling response: {e_inner}')
 def main(hgvs_cdna_transcript_id = 'NM_005228.3:c.2648T>C'):
     report_date = get_report_date()
     hgvs_cdna_transcript_id_truncated = truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
@@ -303,6 +312,8 @@ def main(hgvs_cdna_transcript_id = 'NM_005228.3:c.2648T>C'):
     ensembl_gene_id = get_ensembl_gene_id(gene_symbol)
     high_protein_expression = get_high_protein_expression(ensembl_gene_id)
     current_version_hgvs_cdna_transcript_id = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id_truncated)
+    get_amino_acid_change = get_protein_change_from_cdna(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_split, ensembl_transcript_id)
+    print(get_amino_acid_change)
     full_current_version_hgvs_cdna_transcript_id = get_full_current_version_hgvs_cdna_transcript_id(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_split)
     grch38_variant_position = get_grch38_variant_position(full_current_version_hgvs_cdna_transcript_id)
     transcript_details = get_transcript_details(ensembl_transcript_id, grch38_variant_position)

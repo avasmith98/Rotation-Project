@@ -298,8 +298,8 @@ def get_clinvar(rsID):
                             break
                     if message_found:
                         print('No ClinVar record associated with this rsID.')
-            except Exception as e_inner:
-                print(f'Retrieval from {url} successful. Error handling response: {e_inner}')
+            except Exception:
+                print(f'Retrieval from {url} successful. Error handling response.')
 def main(hgvs_cdna_transcript_id = 'NM_005228.3:c.2648T>C'):
     report_date = get_report_date()
     hgvs_cdna_transcript_id_truncated = truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)

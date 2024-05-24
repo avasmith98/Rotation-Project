@@ -12,9 +12,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, PageBreak, Spacer, Paragraph, Frame
 from reportlab.lib.units import inch
 from reportlab.lib import colors
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, send_file
 from xml.etree import ElementTree as ET
-
 
 def send_request(url, headers=None):
     try:
@@ -324,7 +323,7 @@ def get_clinvar(rsID):
             except Exception:
                 return(f'Retrieval from {url} successful. Error handling response.')
 
-def get_results_dict(hgvs_cdna_transcript_id = 'NM_005228.3:c.2648T>C'):
+def get_results_dict(hgvs_cdna_transcript_id):
     report_date = get_report_date()
     hgvs_cdna_transcript_id_truncated = truncate_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
     hgvs_cdna_transcript_id_split = split_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
@@ -492,24 +491,39 @@ def create_pdf_from_curated_data(story, filename):
 
     doc.build(elements)
 
-ordered_keys = ['title',  
-                'Report generated on', 
-                'Current HGVS ID', 
-                'Coding change', 
-                'Amino acid change',
-                'Protein start',
-                'Protein end',
-                'Cytogenetic band',
-                'High protein expression',
-                'Transcript length',  
-                'Translation length',
-                'Total exons', 
-                'Coding exons',
-                'Exon number',
-                'protein_domains',
-                'clinvar'
-               ]
-results_dict = get_results_dict()
-curated_data = curate_data_for_pdf(results_dict)
-story = append_story_elements(curated_data, ordered_keys)
-create_pdf_from_curated_data(story, 'output.pdf')
+
+app = Flask(__name__)
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        hgvs_cdna_transcript_id = request.form['hgvs_cdna_transcript_id']
+        results_dict = get_results_dict(hgvs_cdna_transcript_id)
+        curated_data = curate_data_for_pdf(results_dict)
+        ordered_keys = [
+            'title',  
+            'Report generated on', 
+            'Current HGVS ID', 
+            'Coding change', 
+            'Amino acid change',
+            'Protein start',
+            'Protein end',
+            'Cytogenetic band',
+            'High protein expression',
+            'Transcript length',  
+            'Translation length',
+            'Total exons', 
+            'Coding exons',
+            'Exon number',
+            'protein_domains',
+            'clinvar'
+        ]
+        story = append_story_elements(curated_data, ordered_keys)
+        pdf_filename = 'output.pdf'
+        create_pdf_from_curated_data(story, pdf_filename)
+        return send_file(pdf_filename, as_attachment=True)
+    return render_template_string(html_template)
+
+def run_app():
+    app.run()
+
+threading.Thread(target=run_app).start()

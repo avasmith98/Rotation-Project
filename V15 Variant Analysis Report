@@ -385,7 +385,7 @@ def curate_data_for_pdf(results_dict):
                 ])
             curated_data.append(('protein_domains', {'data': table_data, 'columns': [100, 100, 100, 100]}))
 
-        elif key == "Clinvar":
+        elif key == 'Clinvar':
             table_data = [['Classification', 'Condition', 'More info']]
             for entry in value:
                 combined_info = Paragraph(
@@ -491,6 +491,29 @@ def create_pdf_from_curated_data(story, filename):
 
     doc.build(elements)
 
+html_template = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <title>Variant Report Generator</title>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Variant Report Generator</h1>
+        <form method="post">
+            <div class="form-group">
+                <label for="hgvs_cdna_transcript_id">HGVS cDNA Transcript ID</label>
+                <input type="text" class="form-control" id="hgvs_cdna_transcript_id" name="hgvs_cdna_transcript_id" placeholder="Enter HGVS cDNA Transcript ID" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Generate Report</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
 
 app = Flask(__name__)
 @app.route('/', methods=['GET', 'POST'])

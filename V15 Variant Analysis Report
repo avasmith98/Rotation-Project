@@ -62,7 +62,7 @@ def get_gene_symbol(ensembl_transcript_id):
         except:
             return(f'Retrieval from {url} successful. Error handling response.') 
 
-def get_full_gene_name(gene_symbol):
+def get_full_gene_name_and_ensembl_gene_id(gene_symbol):
     url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}"
     headers = {"Content-Type": "application/json"}
     response = requests.get(url, headers=headers)
@@ -72,7 +72,8 @@ def get_full_gene_name(gene_symbol):
             description = data.get("description")
             match = re.match(r"([^[]+)", description)
             full_gene_name = match.group(1).strip()
-            return full_gene_name
+            ensembl_gene_id = data.get('id')
+            return full_gene_name, ensembl_gene_id
         except:
             return(f'Retrieval from {url} successful. Error handling response.') 
 
@@ -105,18 +106,6 @@ def get_cytogenetic_band(gene_symbol, chromosome, start, end):
         except:
             return(f'Retrieval from {url} successful. Error handling response.') 
         
-def get_ensembl_gene_id(gene_symbol):
-    url = f'https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene_symbol}'
-    headers = {'Content-Type': 'application/json'}
-    response = send_request(url, headers)
-    if response:
-        try:
-            data = response.json()
-            ensembl_gene_id = data.get('id')
-            return ensembl_gene_id
-        except:
-            return(f'Retrieval from {url} successful. Error handling response.') 
-
 def get_high_protein_expression(ensembl_gene_id):
     url = f'https://www.proteinatlas.org/{ensembl_gene_id}.xml'
     response = send_request(url)
@@ -329,10 +318,9 @@ def get_results_dict(hgvs_cdna_transcript_id):
     hgvs_cdna_transcript_id_split = split_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id)
     ensembl_transcript_id = get_ensembl_transcript_id(hgvs_cdna_transcript_id_truncated)
     gene_symbol = get_gene_symbol(ensembl_transcript_id)
-    full_gene_name = get_full_gene_name(gene_symbol)
+    full_gene_name, ensembl_gene_id = get_full_gene_name_and_ensembl_gene_id(gene_symbol)
     start, end, chromosome = get_gene_start_end_chromosome(gene_symbol)
     cytogenetic_band = get_cytogenetic_band(gene_symbol, start, end, chromosome)
-    ensembl_gene_id = get_ensembl_gene_id(gene_symbol)
     high_protein_expression = get_high_protein_expression(ensembl_gene_id)
     current_version_hgvs_cdna_transcript_id = get_current_version_hgvs_cdna_transcript_id(hgvs_cdna_transcript_id_truncated)
     protein_start, protein_end, amino_acid_change = get_amino_acid_change(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_split, ensembl_transcript_id)
@@ -541,9 +529,9 @@ def index():
             'clinvar'
         ]
         story = append_story_elements(curated_data, ordered_keys)
-        pdf_filename = 'output.pdf'
-        create_pdf_from_curated_data(story, pdf_filename)
-        return send_file(pdf_filename, as_attachment=True)
+        
+        create_pdf_from_curated_data(story)
+        return send_file(as_attachment=True)
     return render_template_string(html_template)
 
 def run_app():

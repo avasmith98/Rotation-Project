@@ -3,6 +3,7 @@ import io
 import datetime
 import requests
 import os
+import atexit
 import re
 import threading
 from bs4 import BeautifulSoup
@@ -179,7 +180,7 @@ def get_grch38_variant_position(current_version_hgvs_cdna_transcript_id):
         except:
             return(f'Retrieval from {url} successful. Error handling response.')
 
-def get_transcript_details(ensembl_transcript_id, variant_position):
+def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position):
     url = f'https://rest.ensembl.org/lookup/id/{ensembl_transcript_id}?expand=1'
     headers = {'Content-Type': 'application/json'}
     response = send_request(url, headers)
@@ -192,19 +193,8 @@ def get_transcript_details(ensembl_transcript_id, variant_position):
             total_exons = len(data['Exon']) if 'Exon' in data else 0
             coding_exons = sum(1 for exon in data['Exon'] if exon['start'] <= translation.get('end', 0) and exon['end'] >= translation.get('start', float('inf')))
             exon_number = next((index for index, exon in enumerate(data.get('Exon', []), start=1) if exon['start'] <= variant_position <= exon['end']), None)
-            return transcript_length, translation_length, total_exons, coding_exons, exon_number, coding_exons
-        except:
-            return(f'Retrieval from {url} successful. Error handling response.')
-
-def get_ensembl_protein_id(ensembl_transcript_id):
-    url = f'https://rest.ensembl.org/lookup/id/{ensembl_transcript_id}?expand=1'
-    headers = {'Content-Type': 'application/json'}
-    response = send_request(url, headers)
-    if response:
-        try:
-            data = response.json()
             ensembl_protein_id = data['Translation']['id']
-            return ensembl_protein_id
+            return ensembl_protein_id, transcript_length, translation_length, total_exons, coding_exons, exon_number, coding_exons
         except:
             return(f'Retrieval from {url} successful. Error handling response.')
 
@@ -291,7 +281,7 @@ def get_clinvar(rsID):
                         cleaned_entry[key] = value
                 cleaned_clinvar.append(cleaned_entry)
             return cleaned_clinvar  
-            
+        
             if len(clinvar) < 1:
                 raise Exception
             else:
@@ -326,8 +316,7 @@ def get_results_dict(hgvs_cdna_transcript_id):
     protein_start, protein_end, amino_acid_change = get_amino_acid_change(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_split, ensembl_transcript_id)
     full_current_version_hgvs_cdna_transcript_id = get_full_current_version_hgvs_cdna_transcript_id(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_split)
     grch38_variant_position = get_grch38_variant_position(full_current_version_hgvs_cdna_transcript_id)
-    transcript_length, translation_length, total_exons, coding_exons, exon_number, coding_exons = get_transcript_details(ensembl_transcript_id, grch38_variant_position)
-    ensembl_protein_id = get_ensembl_protein_id(ensembl_transcript_id)
+    ensembl_protein_id, transcript_length, translation_length, total_exons, coding_exons, exon_number, coding_exons = get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, grch38_variant_position)
     pfam_smart_protein_domains = get_pfam_smart_protein_domains(ensembl_protein_id)
     rsID = get_rsID(full_current_version_hgvs_cdna_transcript_id)
     cleaned_clinvar = get_clinvar(rsID)
@@ -478,6 +467,36 @@ def create_pdf_from_curated_data(story, filename):
             current_height += element_height
 
     doc.build(elements)
+    
+app = Flask(__name__)
+
+html_template = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <title>Variant Report Generator</title>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Variant Report Generator</h1>
+        <form method="post">
+            <div class="form-group">
+                <label for="hgvs_cdna_transcript_id">HGVS cDNA Transcript ID</label>
+                <input type="text" class="form-control" id="hgvs_cdna_transcript_id" name="hgvs_cdna_transcript_id" placeholder="Enter HGVS cDNA Transcript ID" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Generate Report</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+from flask import Flask, request, render_template_string, send_file
+from io import BytesIO
+
+app = Flask(__name__)
 
 html_template = """
 <!doctype html>
@@ -503,7 +522,6 @@ html_template = """
 </html>
 """
 
-app = Flask(__name__)
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -511,18 +529,18 @@ def index():
         results_dict = get_results_dict(hgvs_cdna_transcript_id)
         curated_data = curate_data_for_pdf(results_dict)
         ordered_keys = [
-            'title',  
-            'Report generated on', 
-            'Current HGVS ID', 
-            'Coding change', 
+            'title',
+            'Report generated on',
+            'Current HGVS ID',
+            'Coding change',
             'Amino acid change',
             'Protein start',
             'Protein end',
             'Cytogenetic band',
             'High protein expression',
-            'Transcript length',  
+            'Transcript length',
             'Translation length',
-            'Total exons', 
+            'Total exons',
             'Coding exons',
             'Exon number',
             'protein_domains',
@@ -530,11 +548,19 @@ def index():
         ]
         story = append_story_elements(curated_data, ordered_keys)
         
-        create_pdf_from_curated_data(story)
-        return send_file(as_attachment=True)
+        buffer = BytesIO()
+        create_pdf_from_curated_data(story, buffer)
+        buffer.seek(0)
+        
+        gene_symbol = results_dict['Gene symbol']
+        return send_file(buffer, as_attachment=True, download_name=f'{gene_symbol}.pdf', mimetype='application/pdf')
+    
     return render_template_string(html_template)
 
 def run_app():
     app.run()
 
-threading.Thread(target=run_app).start()
+run_app()
+
+
+   

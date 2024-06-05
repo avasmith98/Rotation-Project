@@ -139,10 +139,10 @@ def get_amino_acid_change(current_version_hgvs_cdna_transcript_id, hgvs_cdna_tra
     data = response.json()
     for consequence in data[0]['transcript_consequences']:
         if consequence['transcript_id'] == ensembl_transcript_id:
-            protein_start = consequence.get('protein_start')
-            protein_end = consequence.get('protein_end', 'Not specified')  
-            amino_acid_change = consequence.get('amino_acids')
-    return protein_start, protein_end, amino_acid_change
+            variant_codon_start = consequence.get('protein_start', 'Not specified')
+            variant_codon_end = consequence.get('protein_end', 'Not specified')  
+            amino_acid_change = consequence.get('amino_acids', 'Not specified')
+    return variant_codon_start, variant_codon_end, amino_acid_change
 
 def get_grch38_variant_position(current_version_hgvs_cdna_transcript_id):
     '''Gets the variant position (in GRCh38 currently) for the specified current version HGVS cDNA transcript ID.'''
@@ -247,7 +247,7 @@ def get_clinvar(rsID):
                 parts = [part.strip() for part in value.split('\n') if part.strip()]
                 condition_dict = {}
                 if len(parts) > 0:
-                    condition_dict['Condition'] = parts[0]
+                    condition_dict['Condition'] = 'Condition: ' + str(parts[0])
                 if len(parts) > 1:
                     condition_dict['Affected status'] = parts[1]
                 if len(parts) > 2:
@@ -259,6 +259,8 @@ def get_clinvar(rsID):
     return cleaned_clinvar  
     
 def get_results_dict(hgvs_cdna_transcript_id):
+    '''Gets the results dictionary for the specified HGVS cDNA transcript ID. Also checks that the HGVS ID is valid
+    and throws an error if it is not.'''
     report_date = get_report_date()
     hgvs_cdna_transcript_id_formatted_1 = format_hgvs_cdna_transcript_id_1(hgvs_cdna_transcript_id)
     hgvs_cdna_transcript_id_formatted_2 = format_hgvs_cdna_transcript_id_2(hgvs_cdna_transcript_id)
@@ -272,7 +274,7 @@ def get_results_dict(hgvs_cdna_transcript_id):
     start, end, chromosome = get_gene_start_end_chromosome(gene_symbol)
     cytogenetic_band = get_cytogenetic_band(start, end, chromosome)
     high_protein_expression = get_high_protein_expression(ensembl_gene_id)
-    protein_start, protein_end, amino_acid_change = get_amino_acid_change(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_formatted_2, ensembl_transcript_id)
+    variant_codon_start, variant_codon_end, amino_acid_change = get_amino_acid_change(current_version_hgvs_cdna_transcript_id, hgvs_cdna_transcript_id_formatted_2, ensembl_transcript_id)
     grch38_variant_position = get_grch38_variant_position(full_current_version_hgvs_cdna_transcript_id)
     ensembl_protein_id, transcript_length, translation_length, total_exons, coding_exons, exon_number, coding_exons = get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, grch38_variant_position)
     pfam_smart_protein_domains = get_pfam_smart_protein_domains(ensembl_protein_id)
@@ -287,11 +289,11 @@ def get_results_dict(hgvs_cdna_transcript_id):
         'Cytogenetic band': cytogenetic_band,
         'High protein expression': high_protein_expression,
         'Current HGVS ID': current_version_hgvs_cdna_transcript_id,
-        'Protein start': protein_start,
-        'Protein end' : protein_end,
+        'Variant codon start': variant_codon_start,
+        'Variant codon end' : variant_codon_end,
         'Amino acid change' : amino_acid_change,
-        'Transcript length' : transcript_length, 
-        'Translation length': translation_length,
+        'Transcript length' : str(transcript_length) + ' base pairs',
+        'Translation length': str(translation_length) + ' residues',
         'Total exons' : total_exons,
         'Coding exons': coding_exons,
         'Exon number' : exon_number,
@@ -311,7 +313,8 @@ def curate_data_for_pdf(results_dict):
             curated_data.append(('title', {'text': f'Variant Report: {results_dict["Full gene name"].title()} ({results_dict["Gene symbol"]})', 'style': 'Title'}))
 
         elif key == 'Protein domains (Sources: Pfam and Smart)':
-            table_data = [['Source', 'Description', 'Start', 'End']]
+            table_data = [['Protein Domains', '', '', '']]  # Add title row spanning all columns
+            table_data.append(['Source', 'Description', 'Start', 'End'])
             for entry in value:
                 table_data.append([
                     Paragraph(entry.get('Source', ''), styles['Normal']),
@@ -322,7 +325,8 @@ def curate_data_for_pdf(results_dict):
             curated_data.append(('protein_domains', {'data': table_data, 'columns': [100, 100, 100, 100]}))
 
         elif key == 'Clinvar':
-            table_data = [['Classification', 'Condition', 'More info']]
+            table_data = [['ClinVar', '', '']]  # Add title row spanning all columns
+            table_data.append(['Classification', 'Condition', 'More info'])
             for entry in value:
                 combined_info = Paragraph(
                     f"{entry.get('Condition', '')}<br/>{entry.get('Affected status', '')}<br/>{entry.get('Allele origin', '')}",
@@ -333,7 +337,7 @@ def curate_data_for_pdf(results_dict):
                     combined_info,
                     Paragraph(entry.get('Variant more info', ''), styles['Normal'])
                 ])
-            curated_data.append(('clinvar', {'data': table_data, 'columns': [100, 100, 200]}))
+            curated_data.append(('clinvar', {'data': table_data, 'columns': [125, 175, 200]}))
 
         else:
             curated_data.append((key, value))
@@ -341,6 +345,7 @@ def curate_data_for_pdf(results_dict):
     return curated_data
 
 def append_story_elements(curated_data, order):
+    '''Appends the story elements to the PDF.'''
     styles = getSampleStyleSheet()
     story = []
 
@@ -354,15 +359,24 @@ def append_story_elements(curated_data, order):
 
                 elif key == 'protein_domains':
                     table_data = item[1]['data']
+                    
                     table_style = TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('SPAN', (0, 0), (-1, 0)),  
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 14),
                         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                        ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
+                        ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
+                        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                        ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+                        ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
                         ('GRID', (0, 0), (-1, -1), 1, colors.black),
                         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('WORDWRAP', (0, 0), (-1, -1)),
+                        ('splitLongWords', (0, 0), (-1, -1), False)
                     ])
                     table = Table(table_data, colWidths=item[1]['columns'])
                     table.setStyle(table_style)
@@ -371,15 +385,24 @@ def append_story_elements(curated_data, order):
 
                 elif key == 'clinvar':
                     table_data = item[1]['data']
+                    
                     table_style = TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('SPAN', (0, 0), (-1, 0)),  
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 14),
                         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                        ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
+                        ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
+                        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                        ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+                        ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
                         ('GRID', (0, 0), (-1, -1), 1, colors.black),
                         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('WORDWRAP', (0, 0), (-1, -1)),
+                        ('splitLongWords', (0, 0), (-1, -1), False)
                     ])
                     table = Table(table_data, colWidths=item[1]['columns'])
                     table.setStyle(table_style)
@@ -410,7 +433,7 @@ def create_pdf_from_curated_data(story, filename):
             if current_height + table_height > available_height:
                 elements.append(PageBreak())
                 current_height = 0
-            
+
             elements.append(element)
             current_height += table_height
         
@@ -420,11 +443,16 @@ def create_pdf_from_curated_data(story, filename):
             if current_height + element_height > available_height:
                 elements.append(PageBreak())
                 current_height = 0
-            
+
             elements.append(element)
             current_height += element_height
 
+    if elements and isinstance(elements[-2], PageBreak):
+        elements.pop(-2)
+    
+    print(elements)
     doc.build(elements)
+
 
 app = Flask(__name__)
 
@@ -453,6 +481,7 @@ html_template = """
 """
 
 @app.route('/', methods=['GET', 'POST'])
+
 def index():    
     if request.method == 'POST':
         hgvs_cdna_transcript_id = request.form['hgvs_cdna_transcript_id']
@@ -464,8 +493,8 @@ def index():
             'Current HGVS ID',
             'Coding change',
             'Amino acid change',
-            'Protein start',
-            'Protein end',
+            'Variant codon start',
+            'Variant codon end',
             'Cytogenetic band',
             'High protein expression',
             'Transcript length',
@@ -488,6 +517,7 @@ def index():
     return render_template_string(html_template)
 
 app.debug = True
+
 def run_app():
     app.run()
 

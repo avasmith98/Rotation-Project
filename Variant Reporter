@@ -356,6 +356,30 @@ def append_story_elements(curated_data, order):
     styles = getSampleStyleSheet()
     story = []
 
+    domain_colors = [
+        colors.HexColor('#60d5ca'),  # light sea green
+        colors.HexColor('#c1d7e3'),  # light blue
+        colors.HexColor('#fde3a3'),  # light orange
+        colors.HexColor('#c7e9b3'),  # light green
+        colors.HexColor('#fbc6c6'),  # light red
+        colors.HexColor('#dfc7e5'),  # light purple
+        colors.HexColor('#d9ecd9'),  # light sky blue
+        colors.HexColor('#ffd6b3'),  # light peach
+        colors.HexColor('#cce5ff'),  # light lavender blue
+        colors.HexColor('#ffd699'),  # light sand
+        colors.HexColor('#e5f2ff'),  # light powder blue
+        colors.HexColor('#ffd6d6'),  # light pink
+        colors.HexColor('#d6ffb3'),  # light lime
+        colors.HexColor('#ffffe5'),  # light lemon
+        colors.HexColor('#e5ffe5'),  # light mint
+        colors.HexColor('#ffebd6'),  # light apricot
+        colors.HexColor('#e5d6ff'),  # light mauve
+        colors.HexColor('#d6ffff'),  # light aqua
+        colors.HexColor('#ffebd6')   # light coral
+    ]
+    
+    unique_descriptions = {}
+
     for key in order:
         for item in curated_data:
             if item[0] == key:
@@ -376,15 +400,24 @@ def append_story_elements(curated_data, order):
                         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                         ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
                         ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
-                        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
                         ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-                        ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
-                        ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
                         ('GRID', (0, 0), (-1, -1), 1, colors.black),
                         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                         ('WORDWRAP', (0, 0), (-1, -1)),
                         ('splitLongWords', (0, 0), (-1, -1), False)
                     ])
+
+                    # Apply different colors to the domain rows based on unique descriptions
+                    for i in range(2, len(table_data)):
+                        description = table_data[i][1].getPlainText()
+
+                        if description not in unique_descriptions:
+                            color_index = len(unique_descriptions) % len(domain_colors)
+                            unique_descriptions[description] = domain_colors[color_index]
+
+                        color = unique_descriptions[description]
+                        table_style.add('BACKGROUND', (0, i), (-1, i), color)
+
                     table = Table(table_data, colWidths=item[1]['columns'])
                     table.setStyle(table_style)
                     story.append(table)
@@ -423,6 +456,7 @@ def append_story_elements(curated_data, order):
                     story.append(Spacer(1, 12))
 
     return story
+
 
 def create_pdf_from_curated_data(story, filename):
     """Creates a PDF from the curated data and saves it to the specified filename. Adds page breaks if necessary."""

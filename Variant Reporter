@@ -164,7 +164,7 @@ def get_grch38_variant_position(current_version_hgvs_cdna_transcript_id):
                             grch38_variant_position = int(''.join(filter(str.isdigit, position)))
                             return grch38_variant_position
 
-def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant_position):
+def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, grch38_variant_position):
     '''Gets the Ensembl protein ID, transcript length, translation length, total exons, coding exons, 
     exon number, and coding exons for the specified Ensembl transcript ID and variant position.'''
     url = f'https://rest.ensembl.org/lookup/id/{ensembl_transcript_id}?expand=1'
@@ -176,7 +176,7 @@ def get_transcript_details_and_ensembl_protein_id(ensembl_transcript_id, variant
     translation_length = translation['length']
     total_exons = len(data['Exon']) if 'Exon' in data else 0
     coding_exons = sum(1 for exon in data['Exon'] if exon['start'] <= translation.get('end', 0) and exon['end'] >= translation.get('start', float('inf')))
-    exon_number = next((index for index, exon in enumerate(data.get('Exon', []), start=1) if exon['start'] <= variant_position <= exon['end']), None)
+    exon_number = next((index for index, exon in enumerate(data.get('Exon', []), start=1) if exon['start'] <= grch38_variant_position <= exon['end']), None)
     ensembl_protein_id = data['Translation']['id']
     return ensembl_protein_id, transcript_length, translation_length, total_exons, coding_exons, exon_number, coding_exons
 
@@ -280,7 +280,13 @@ def get_results_dict(hgvs_cdna_transcript_id):
     pfam_smart_protein_domains = get_pfam_smart_protein_domains(ensembl_protein_id)
     rsID = get_rsID(full_current_version_hgvs_cdna_transcript_id)
     cleaned_clinvar = get_clinvar(rsID)
-
+    source_info = (
+    f'https://www.proteinatlas.org/{ensembl_gene_id}-{gene_symbol}/tissue\n'
+    f'https://www.ncbi.nlm.nih.gov/snp/?term={current_version_hgvs_cdna_transcript_id}'
+    )
+    if len(cleaned_clinvar) > 0:
+        source_info += f'\nhttps://www.ncbi.nlm.nih.gov/clinvar/?term={rsID}'
+    
     results_dict = {
         'Gene symbol': gene_symbol,
         'Report generated on': report_date,
@@ -298,7 +304,8 @@ def get_results_dict(hgvs_cdna_transcript_id):
         'Coding exons': coding_exons,
         'Exon number' : exon_number,
         'Protein domains (Sources: Pfam and Smart)': pfam_smart_protein_domains,
-        'Clinvar': cleaned_clinvar
+        'Clinvar': cleaned_clinvar,
+        'Sources': source_info
     }
     
     return results_dict
@@ -450,7 +457,6 @@ def create_pdf_from_curated_data(story, filename):
     if elements and isinstance(elements[-2], PageBreak):
         elements.pop(-2)
     
-    print(elements)
     doc.build(elements)
 
 
@@ -503,7 +509,8 @@ def index():
             'Coding exons',
             'Exon number',
             'protein_domains',
-            'clinvar'
+            'clinvar',
+            'Sources'
         ]
         story = append_story_elements(curated_data, ordered_keys)
         
